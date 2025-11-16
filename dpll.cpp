@@ -98,8 +98,6 @@ bool propagate() {
           watchers[index][i] = watchers[index].back();
           watchers[index].pop_back();
           break;
-        } else {
-          i++;
         }
       }
 
@@ -108,10 +106,13 @@ bool propagate() {
       } // found another non-false literal to watch; do nothing
 
       if (value_of(other_watch) == FALSE) {
-        return false;
+        return false; // all literals are false, conflict found; return false
       } else {
-        trail.push_back(other_watch);
-        assignments[std::abs(literal)] = literal > 0 ? TRUE : FALSE;
+        trail.push_back(other_watch); // all literals but one are false;
+                                      // propagate the new unit clause
+        assignments[std::abs(literal)] =
+            literal > 0 ? TRUE : FALSE; // a new unit is being propagated, so we
+                                        // need to assign it
         i++;
       }
     }
@@ -144,9 +145,8 @@ void parse() {
         std::cin >> literal;
       }
       clauses.push_back(
-          {clause, 0,
-           0}); // the 0s are temporary values; on initialisation, they will be
-                // given literal values as watched literals
+          {clause, 0, 0}); // the 0s are temporary values; on initialisation,
+                           // they will be given indices for watched literals
     }
   }
   assignments.resize(num_vars + 1); // the assignment vector is 1-indexed
