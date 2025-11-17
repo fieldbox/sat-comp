@@ -30,11 +30,26 @@ enum Value { TRUE, FALSE, UNASSIGNED };
 
 int num_vars, num_clauses;
 std::vector<Clause> clauses;
-std::vector<int> trail;
-int trail_head = 0;
-std::vector<Value> assignments;
-std::vector<std::vector<Clause *>> watchers;
-int assigned_vars = 0;
+
+std::vector<int> trail; // all assignments in chronological order
+int trail_head = 0;     // index of the most recently propagated assignment
+
+std::vector<Value> assignments; // all assignments, indexed by variable
+int assigned_vars = 0;          // number of variables that are assigned
+
+std::vector<std::vector<Clause *>>
+    watchers; // contains lists of all clauses watching a literal, indexed by
+              // literal using get_watcher_index()
+
+std::vector<int> trail_decisions; // index of the beginning of each decision
+                                  // level in the trail
+std::vector<int> decision_levels; // decision level each variable was assigned
+
+std::vector<double> activity; // activity of a variable, indexed by variable
+const double activity_inc =
+    1; // amount to increment activity by when a conflict is found
+const double activity_decay =
+    0.95; // amount to decay activity by when a conflict is found
 
 int get_watcher_index(int literal) {
   return (literal > 0)
@@ -114,7 +129,7 @@ bool propagate() {
         assignments[std::abs(literal)] =
             literal > 0 ? TRUE : FALSE; // a new unit is being propagated, so we
                                         // need to assign it
-	assigned_vars++;
+        assigned_vars++;
         i++;
       }
     }
@@ -182,13 +197,15 @@ void initialise() {
 
 bool sat_loop() {
   while (true) {
-    if (propagate()) { // propagate unit clauses. if propagate returns true, no conflict was found
+    if (propagate()) { // propagate unit clauses. if propagate returns true, no
+                       // conflict was found
       if (assigned_vars == num_vars) {
         return true;
       } else {
         // TODO: implement decide() function
         std::cout << "decide function not implemented" << std::endl;
-	return false; // REMOVE - formulas that need a decision are NOT unsatisfiable!
+        return false; // REMOVE - formulas that need a decision are NOT
+                      // unsatisfiable!
       }
     } else {
       // TODO: implement conflict analysis and backtracking
