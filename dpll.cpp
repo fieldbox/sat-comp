@@ -34,6 +34,7 @@ std::vector<int> trail;
 int trail_head = 0;
 std::vector<Value> assignments;
 std::vector<std::vector<Clause *>> watchers;
+int assigned_vars = 0;
 
 int get_watcher_index(int literal) {
   return (literal > 0)
@@ -113,6 +114,7 @@ bool propagate() {
         assignments[std::abs(literal)] =
             literal > 0 ? TRUE : FALSE; // a new unit is being propagated, so we
                                         // need to assign it
+	assigned_vars++;
         i++;
       }
     }
@@ -165,6 +167,7 @@ void initialise() {
       trail.push_back(literal); // unit clause, so add its literal to the
                                 // trail to be propagated
       assignments[std::abs(literal)] = literal > 0 ? TRUE : FALSE;
+      assigned_vars++;
     } else {
       watchers[get_watcher_index(clauses[i].literals[0])].push_back(
           &clauses[i]); // add the first two literals as watched literals to the
@@ -177,10 +180,25 @@ void initialise() {
   }
 }
 
+bool sat_loop() {
+  while (true) {
+    if (propagate()) { // propagate unit clauses. if propagate returns true, no conflict was found
+      if (assigned_vars == num_vars) {
+        return true;
+      } else {
+        // TODO: implement decide() function
+        std::cout << "decide function not implemented" << std::endl;
+	return false; // REMOVE - formulas that need a decision are NOT unsatisfiable!
+      }
+    } else {
+      // TODO: implement conflict analysis and backtracking
+    }
+  }
+}
+
 int main(void) {
   parse();
   initialise();
-  std::cout << (propagate() == true ? "SATISFIABLE" : "UNSATISFIABLE")
-            << std::endl;
+  std::cout << (sat_loop() ? "SATISFIABLE" : "UNSATISFIABLE") << std::endl;
   return 0;
 }
