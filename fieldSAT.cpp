@@ -1,4 +1,4 @@
-/* dpll.cpp - SAT solver for competition
+/* fieldSAT.cpp - SAT solver for competition
 Copyright (C) 2025 fieldbox
 
 This program is free software: you can redistribute it and/or modify it under
