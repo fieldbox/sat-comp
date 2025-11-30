@@ -17,7 +17,6 @@ this program. If not, see <https://www.gnu.org/licenses/>.*/
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <deque>
 #include <iostream>
 #include <ostream>
 #include <string>
@@ -27,6 +26,8 @@ struct Clause {
   std::vector<int> literals;
   int watch1;
   int watch2;
+  double activity = 0;   // only relevant for learned clauses
+  bool toRemove = false; // only relevant for learned clauses
 };
 
 enum Value { TRUE, FALSE, UNASSIGNED };
@@ -34,7 +35,7 @@ enum Value { TRUE, FALSE, UNASSIGNED };
 bool verbose = false;
 
 int num_vars, num_clauses;
-std::deque<Clause> clauses;
+std::vector<Clause *> clauses;
 
 std::vector<int> trail; // all assignments in chronological order
 int trail_head = 0;     // index of the most recently propagated assignment
@@ -56,16 +57,24 @@ std::vector<int> trail_decisions; // index of the beginning of each decision
 std::vector<int>
     decision_levels; // decision level each variable was assigned at
 
-std::vector<std::vector<int>>
-    reasons; // clause that implies each variable's value
+std::vector<Clause *> reasons; // clause that implies each variable's value
 
-std::vector<int> conflict_clause; // most recent conflict clause
+Clause *conflict_clause; // most recent conflict clause
 
 std::vector<double> activity; // activity of a variable, indexed by variable
 const double activity_inc =
     1; // amount to increment activity by when a conflict is found
 const double activity_decay =
     0.95; // amount to decay activity by when a conflict is found
+
+std::vector<Clause *> learned_clauses; // pointers to all learned clauses
+int num_conflicts;                     // number of conflicts that have occurred
+const int reduction_threshold =
+    3000; // threshold of number of conflicts before the clause list is reduced
+const double clause_activity_inc =
+    1; // amount to increase clause activity by when a conflict is found
+const double clause_activity_decay =
+    0.95; // amount to decay clause activity by when a conflict is found
 
 int get_literal_index(int literal) {
   return (literal > 0)
@@ -143,10 +152,10 @@ bool propagate() {
       } // found another non-false literal to watch; do nothing
 
       if (value_of(other_watch) == FALSE) {
-        conflict_clause = clause.literals;
+        conflict_clause = &clause;
         if (verbose) {
           std::cout << "conflict! conflict clause: [";
-          for (int literal : conflict_clause) {
+          for (int literal : conflict_clause->literals) {
             std::cout << literal << ", ";
           }
           std::cout << "]" << std::endl;
@@ -164,7 +173,7 @@ bool propagate() {
         last_assignments[std::abs(other_watch)] =
             other_watch > 0 ? TRUE : FALSE;
         decision_levels[std::abs(other_watch)] = trail_decisions.size() - 1;
-        reasons[std::abs(other_watch)] = clause.literals;
+        reasons[std::abs(other_watch)] = &clause;
         assigned_vars++;
         i++;
       }
@@ -210,7 +219,9 @@ std::vector<int> analyse() {
          // decision level. once this hits 1, we have found the first UIP, so we
          // stop
 
-  std::vector<int> learned_clause = conflict_clause;
+  conflict_clause->activity += clause_activity_inc;
+
+  std::vector<int> learned_clause = conflict_clause->literals;
   std::vector<bool> seen;
   seen.resize(2 * num_vars);
   std::fill(seen.begin(), seen.end(), false);
@@ -243,7 +254,10 @@ std::vector<int> analyse() {
     if (index !=
         learned_clause
             .size()) { // std::find returns vector.size() if item not found
-      std::vector<int> reason_clause = reasons[std::abs(trail[i])];
+
+      Clause *reason_clause_ptr = reasons[std::abs(trail[i])];
+      reason_clause_ptr->activity += clause_activity_inc;
+      std::vector<int> reason_clause = reason_clause_ptr->literals;
       if (reason_clause.empty()) // decision literals have no reason clause, so
                                  // we can skip them
         continue;
@@ -269,18 +283,76 @@ std::vector<int> analyse() {
   }
 
   for (int i = 0; i < activity.size(); i++) {
-    activity[i] /= activity_decay;
+    activity[i] *= activity_decay;
+  }
+
+  for (Clause *ptr : learned_clauses) {
+    ptr->activity *= clause_activity_decay;
   }
 
   return learned_clause;
+}
+
+void reduce() {
+  std::sort(learned_clauses.begin(), learned_clauses.end(),
+            [](Clause *ptr1, Clause *ptr2) {
+              return (ptr1->activity < ptr2->activity);
+            });
+
+  std::vector<Clause *> clauses_to_remove;
+
+  for (int i = 0; i < learned_clauses.size() / 2; i++) {
+    if (reasons[std::abs(learned_clauses[i]->literals[0])] !=
+        learned_clauses[i]) {
+      learned_clauses[i]->toRemove = true;
+      clauses_to_remove.push_back(learned_clauses[i]);
+    }
+  }
+
+  int old_size = learned_clauses.size();
+
+  for (Clause *c : learned_clauses) {
+    if (c->toRemove) {
+      for (int index : {c->watch1, c->watch2}) {
+        int lit = get_literal_index(c->literals[index]);
+        watchers[lit].erase(
+            std::remove(watchers[lit].begin(), watchers[lit].end(), c),
+            watchers[lit].end());
+      }
+    }
+  }
+
+  learned_clauses.erase(std::remove_if(learned_clauses.begin(),
+                                       learned_clauses.end(),
+                                       [](Clause *c) { return c->toRemove; }),
+                        learned_clauses.end());
+
+  clauses.erase(std::remove_if(clauses.begin(), clauses.end(),
+                               [](Clause *c) {
+                                 bool remove = c->toRemove;
+                                 return remove;
+                               }),
+                clauses.end());
+
+  int new_size = learned_clauses.size();
+
+  for (Clause *ptr : clauses_to_remove) {
+    delete ptr;
+  }
+
+  if (verbose)
+    std::cout << "removed " << old_size - new_size << " clauses" << std::endl;
+  num_conflicts = 0;
 }
 
 void backjump(std::vector<int> learned_clause) {
 
   int uip = 0; // after backjumping, the UIP (which is the
                // last element) will be propagated
+  int uip_index = -1;
   int highest_decision_level = 0;
-  for (int literal : learned_clause) {
+  for (int i = 0; i < learned_clause.size(); i++) {
+    int literal = learned_clause[i];
     int level = decision_levels[std::abs(literal)];
     if (level != trail_decisions.size() - 1) {
       if (level > highest_decision_level) {
@@ -288,6 +360,7 @@ void backjump(std::vector<int> learned_clause) {
       }
     } else {
       uip = literal;
+      uip_index = i;
     }
   }
 
@@ -306,30 +379,42 @@ void backjump(std::vector<int> learned_clause) {
     assignments[variable] = UNASSIGNED;
     assigned_vars--;
     decision_levels[variable] = -1;
-    reasons[variable].resize(0);
+    reasons[variable] = nullptr;
     trail.pop_back();
   }
 
   if (learned_clause.size() != 1) {
-    clauses.push_back({learned_clause, 0, 1});
-    Clause *ptr = &clauses.back();
-    watchers[get_literal_index(learned_clause[0])].push_back(ptr);
-    watchers[get_literal_index(learned_clause[1])].push_back(ptr);
+    int temp = learned_clause[0];
+    learned_clause[0] = learned_clause[uip_index];
+    learned_clause[uip_index] =
+        temp; // swap UIP (asserting literal) into position 0 so later, we can
+              // easily check if learned clause is "locked" (i.e. it is a reason
+              // clause for a current assignment, and cannot be deleted)
+    Clause *c = new Clause({learned_clause, 0, 1});
+    clauses.push_back(c);
+    watchers[get_literal_index(learned_clause[0])].push_back(c);
+    watchers[get_literal_index(learned_clause[1])].push_back(c);
+    learned_clauses.push_back(c);
     trail_decisions.resize(highest_decision_level + 1);
   } else {
-    clauses.push_back({learned_clause, 0, 0});
-    Clause *ptr = &clauses.back();
-    watchers[get_literal_index(learned_clause[0])].push_back(ptr);
+    Clause *c = new Clause({learned_clause, 0, 0});
+    clauses.push_back(c);
+    watchers[get_literal_index(learned_clause[0])].push_back(c);
+    learned_clauses.push_back(c);
     trail_decisions.resize(1);
   }
   trail.push_back(uip);
   trail_head = trail.size() - 1;
-  reasons[std::abs(uip)] = learned_clause;
+  reasons[std::abs(uip)] = clauses.back();
   decision_levels[std::abs(uip)] = highest_decision_level;
   Value uip_value = uip > 0 ? TRUE : FALSE;
   assignments[std::abs(uip)] = uip_value;
   last_assignments[std::abs(uip)] = uip_value;
   assigned_vars++;
+
+  if (num_conflicts >= reduction_threshold) {
+    reduce();
+  }
 }
 
 void parse() {
@@ -361,9 +446,8 @@ void parse() {
         }
         std::cin >> literal;
       }
-      clauses.push_back(
-          {clause, 0, 0}); // the 0s are temporary values; on initialisation,
-                           // they will be given indices for watched literals
+      Clause *c = new Clause({clause, 0, 0});
+      clauses.push_back(c);
     }
   }
 }
@@ -395,8 +479,8 @@ bool initialise() {
       0); // the root decision level begins at trail index 0
 
   for (int i = 0; i < clauses.size(); i++) {
-    if (clauses[i].literals.size() == 1) {
-      int literal = clauses[i].literals[0];
+    if (clauses[i]->literals.size() == 1) {
+      int literal = clauses[i]->literals[0];
       Value lit_value = literal > 0 ? TRUE : FALSE;
       if (assignments[std::abs(literal)] == UNASSIGNED) {
         trail.push_back(literal); // unit clause, so add its literal to the
@@ -407,13 +491,13 @@ bool initialise() {
         return false;
       }
     } else {
-      watchers[get_literal_index(clauses[i].literals[0])].push_back(
-          &clauses[i]); // add the first two literals as watched literals to the
-                        // watchers array and struct attributes
-      watchers[get_literal_index(clauses[i].literals[1])].push_back(
-          &clauses[i]);
-      clauses[i].watch1 = 0;
-      clauses[i].watch2 = 1;
+      watchers[get_literal_index(clauses[i]->literals[0])].push_back(
+          clauses[i]); // add the first two literals as watched literals to the
+                       // watchers array and struct attributes
+      watchers[get_literal_index(clauses[i]->literals[1])].push_back(
+          clauses[i]);
+      clauses[i]->watch1 = 0;
+      clauses[i]->watch2 = 1;
     }
   }
 
@@ -431,6 +515,7 @@ bool sat_loop() {
         decide();
       }
     } else {
+      num_conflicts++;
       if (trail_decisions.size() - 1 == 0) {
         return false; // conflict at root decision level means unsat
       }
