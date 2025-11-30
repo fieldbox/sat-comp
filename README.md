@@ -1,22 +1,22 @@
-# SAT Competition
+# fieldSAT
 
 This is my entry for a SAT solver competition at my university.
 
 ## Building
 
-Simply compile `dpll.cpp` with any C++ compiler, e.g.:
+Simply compile `fieldSAT.cpp` with any C++ compiler, e.g.:
 
-```g++ dpll.cpp -o sat```
+```g++ fieldSAT.cpp -o fieldSAT```
 
 ## Usage
 
 This program takes input in the DIMACS CNF format from stdin. Example usage:
 
-```./sat < problem.cnf```
+```./fieldSAT < problem.cnf```
 
 (where `problem.cnf` is a file in DIMACS CNF format.)
 
-Currently, only the unit propagation function is implemented.
+The `-v` flag will make the solver output more information about which variable it is assigning/propagating/deciding, where it is backjumping to, etc.
 
 ## Licensing
 
