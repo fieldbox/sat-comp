@@ -1,6 +1,6 @@
 # fieldSAT
 
-This is my entry for a SAT solver competition at my university.
+This is my entry for a SAT solver competition at my university (which won the competition!).
 
 ## Building
 
