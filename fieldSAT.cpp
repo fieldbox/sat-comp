@@ -76,6 +76,9 @@ const double clause_activity_inc =
 const double clause_activity_decay =
     0.95; // amount to decay clause activity by when a conflict is found
 
+int max_conflicts =
+    100; // threshold of number of conflicts before solver is restarted
+
 int get_literal_index(
     int literal) { // some lists are indexed by literal, which can be positive
                    // or negative (but not 0). this function maps the positive
@@ -353,7 +356,28 @@ void reduce() { // remove low activity learned clauses
 
   if (verbose)
     std::cout << "removed " << old_size - new_size << " clauses" << std::endl;
-  num_conflicts = 0; // reset the number of conflicts
+}
+
+void restart() {
+  if (verbose)
+    std::cout << "reached " << num_conflicts << " conflicts! restarting..."
+              << std::endl;
+
+  for (int i = trail.size() - 1; i >= 0; i--) { // unassign every variable
+    int literal = trail[i];
+    int variable = std::abs(literal);
+    assignments[variable] = UNASSIGNED;
+    assigned_vars--;
+    decision_levels[variable] = -1;
+    reasons[variable] = nullptr;
+    trail.pop_back();
+  }
+
+  max_conflicts *= 1.5; // geometric restart strategy - increase number of
+                        // conflicts required for a restart with each restart
+  if (verbose)
+    std::cout << "increasing restart threshold to " << max_conflicts
+              << std::endl;
 }
 
 void backjump(
@@ -425,8 +449,12 @@ void backjump(
   last_assignments[std::abs(uip)] = uip_value;
   assigned_vars++;
 
-  if (num_conflicts >= reduction_threshold) {
+  if (num_conflicts % reduction_threshold == 0) {
     reduce();
+  }
+
+  if (num_conflicts >= max_conflicts) {
+    restart();
   }
 }
 
